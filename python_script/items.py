@@ -14,22 +14,7 @@ import re
 async def test():
     await database.database_update_structure()
 
-# アップデートパスワード
-update_password = "hello world"
 
-
-def randomname(n):
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
-
-
-try:
-    with open("/fastapi/password.txt") as f:
-        update_password = f.read()
-except BaseException:
-    update_password = str(randomname(10))
-    f = open("/fastapi/password.txt", 'w')
-    f.write(update_password)
-    f.close()
 
 
 # システム状態変数
@@ -41,20 +26,7 @@ all_mainkey = {}
 # データベース最適化
 
 
-async def run(cmd, cwd):
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await proc.communicate()
-    print(f'[{cmd!r} exited with {proc.returncode}]')
-    if stdout:
-        print(f'[stdout]\n{stdout.decode()}')
-    if stderr:
-        print(f'[stderr]\n{stderr.decode()}')
-    return proc.returncode
+
 
 # ページ切り出し
 
@@ -82,89 +54,7 @@ def str_to_date(date):
     return normalization_date
 
 
-async def update():
-    # 状態変数
-    global update_status
-    global all_mainkey
-    update_status = "NO"
 
-    # アップデート処理中なら終了
-    if update_status == "NO":
-        update_status = "progress"
-    else:
-        return update_status
-
-    # クローラ非同期マルチプロセス実行
-
-    update_status = "get data"
-    return_code = await run("python3 /update/ayame/src/get_all.py", "/update/ayame")
-    if int(return_code) != 0:
-        update_status = "NO"
-        return "being24 error"
-
-    # クロールデータのメモリロード
-    try:
-        json_contents = ""
-        async with aiofiles.open(
-            '/update/ayame/data/data.json',
-            mode='r'
-        ) as f:
-            json_contents = await f.read()
-        json_load = json.loads(str(json_contents))
-    except BaseException:
-        update_status = "NO"
-        return "file load error"
-
-    # データベース更新
-    # try:
-    # データベースインデックス作成
-    await database.make_index()
-
-    # 進捗状況用変数
-    total = len(json_load)
-    now_count = 0
-
-    # 時刻インスタンス生成
-    JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST')
-    dt_now = datetime.datetime.now(JST)
-
-    for idata in json_load:
-
-        # 進捗状況更新
-        now_count += 1
-        update_status = str(now_count) + "/" + str(total) + \
-            " : " + str(round((now_count / total) * 100, 2)) + "%"
-        # データ構造の自動生成
-
-        newdocument = {key: idata[key]
-                       for key in idata.keys() if (key != "tags")}
-        newdocument["tags"] = idata["tags"].split(" ")
-        newdocument["date"] = str(dt_now.date())
-        newdocument = database.convert_str_in_a_document_to_datetime(
-            newdocument)
-        newdocument = database.convert_str_to_int(newdocument)
-        try:
-            newdocument["id"]
-        except BaseException:
-            print(newdocument)
-        # data db更新
-        await database.update_data_db(copy.copy(newdocument))
-
-        # tag検索用db更新
-        await database.update_tag_text_search_db(copy.copy(newdocument))
-
-    update_status = "NO"
-    # データベース最適化
-    await database.compact_db()
-
-    # mainkey一覧更新
-    all_mainkey["fullname"] = await database.get_all_mainkey_from_db(
-        "fullname"
-    )
-    all_mainkey["id"] = await database.get_all_mainkey_from_db("id")
-    # データベース更新日更新
-    await database.update_last_update_date()
-    return "update complete"
 
 
 # fullnameと日付で全情報を取得
@@ -180,48 +70,7 @@ async def get_fullname_search(metatitle):
     return result
 
 
-async def get_mainkey_from_latest_tag_fuzzy_search(mainkey, tags):
-    if len(tags) == 0:
-        return []
-    if tags[0] is None:
-        return []
-    cursor = database.search_tag_collection.find(
-        {
-            "$and": [{"tags": {"$regex": re.escape(key)}} for key in tags],
-        },
-        {
-            "_id": 0,
-            mainkey: 1
-        }
-    ).sort(mainkey)
-    result = [
-        doc[mainkey] async for doc in cursor
-        if mainkey in doc and doc[mainkey] is not None
-    ]
-    return result
 
-
-async def get_mainkey_from_latest_tag_perfect_matching(mainkey, tags):
-
-    if len(tags) == 0:
-        return []
-    if tags[0] is None:
-        return []
-    cursor = database.search_tag_collection.find(
-        {
-            "tags": {"$all": tags}
-        },
-        {
-            "_id": 0,
-            mainkey: 1,
-            "date": 1
-        }
-    ).sort(mainkey)
-    result = [
-        doc[mainkey] async for doc in cursor
-        if mainkey in doc and doc[mainkey] is not None
-    ]
-    return result
 
 
 async def get_status():
@@ -241,13 +90,7 @@ async def get_status():
     return status
 
 
-async def get_data_from_mainkey_and_date(mainkey, key, date):
-    result = database.get_data_from_mainkey_and_date_db(
-        mainkey,
-        key,
-        str_to_date(date)
-    )
-    return await result
+
 
 
 async def get_rate_from_mainkey_during_the_period(mainkey, key, start, stop):
@@ -287,13 +130,7 @@ async def get_rate_from_mainkey_during_the_period(mainkey, key, start, stop):
     return result
 
 
-async def get_all_mainkey(mainkey, _range, _page):
-    global all_mainkey
-    if mainkey in all_mainkey:
-        pass
-    else:
-        all_mainkey[mainkey] = await database.get_all_mainkey_from_db(mainkey)
-    return make_page(all_mainkey[mainkey], _range, _page)
+
 
 
 async def get_dates_from_mainkey(mainkey, key, _range, _page):
@@ -316,8 +153,4 @@ async def get_id_during_time_from_created_at(start, stop):
     return result
 
 
-async def get_latest_data_from_mainkey(mainkey, key):
-    return await database.search_tag_collection.find_one(
-        {mainkey: key},
-        {"_id": 0}
-    )
+
